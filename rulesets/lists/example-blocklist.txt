@@ -1,0 +1,6 @@
+# One address, CIDR range or dash-separated range per line.
+# Blank lines are skipped; everything after a # or ; is a comment.
+
+203.0.113.0/24      # TEST-NET-3, safe placeholder
+198.51.100.0/24     # TEST-NET-2, safe placeholder
+192.0.2.10-192.0.2.20

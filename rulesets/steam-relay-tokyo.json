@@ -1,0 +1,45 @@
+{
+  "group": "SDR-Pin-TYO",
+  "description": "Force Steam Datagram Relay traffic onto the Tokyo POP by blocking every other relay, so matchmaking cannot hand you a distant relay while a ~20ms one is available. Recipe from https://zenn.dev/kikurage7/articles/8b4d12fe0b7198 . Game-agnostic: appId is derived from the -Program executable via Steam's appmanifest, so point -Program at any game's .exe. Replace \"auto\" with a numeric appId if you want to apply this machine-wide instead.",
+
+  "defaults": {
+    "direction": "Outbound",
+    "action": "Block",
+    "protocol": "UDP"
+  },
+
+  "rules": [
+    {
+      "key": "sdr-relays",
+      "displayName": "SDR block non-TYO relays",
+      "description": "Current-generation SDR relays outside the tyo POP. Address list and port range are both read from Valve's published config at apply time, so re-running this tracks their infrastructure changes.",
+      "remoteAddress": {
+        "resolver": "steam-sdr",
+        "appId": "auto",
+        "excludePops": ["tyo"],
+        "minCount": 100
+      },
+      "remotePort": {
+        "resolver": "steam-sdr",
+        "appId": "auto",
+        "excludePops": ["tyo"],
+        "emit": "portRange"
+      }
+    },
+    {
+      "key": "legacy-relays",
+      "displayName": "SDR block non-TYO legacy relays",
+      "description": "Previous-generation P2P relays on UDP 4379-4380. These are not listed by GetSDRConfig, so Valve's netblocks are hard-coded here. Tokyo's legacy range 45.121.184.0/24 is deliberately absent from the list, which is how the Tokyo legacy relays stay reachable.",
+      "remotePort": "4379-4380",
+      "remoteAddress": [
+        "146.66.152.0/21",
+        "155.133.128.0/17",
+        "162.254.192.0/21",
+        "185.25.180.0/22",
+        "205.196.6.0/24",
+        "103.28.54.0/24",
+        "103.10.124.0/23"
+      ]
+    }
+  ]
+}

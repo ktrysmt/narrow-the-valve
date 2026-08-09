@@ -1,0 +1,47 @@
+{
+  "group": "Example-App-Blocklist",
+  "description": "TEMPLATE - edit before use. Blocks one application's outbound traffic to the addresses listed in lists/example-blocklist.txt. Demonstrates the 'file' resolver, per-rule program scoping, and static ports. Applying this as-is will fail on purpose, because the program path below does not exist.",
+
+  "defaults": {
+    "direction": "Outbound",
+    "action": "Block",
+    "program": "C:\\Program Files\\Example\\example.exe"
+  },
+
+  "rules": [
+    {
+      "key": "tcp",
+      "displayName": "Example app - block listed hosts (TCP)",
+      "protocol": "TCP",
+      "remoteAddress": {
+        "resolver": "file",
+        "path": "lists/example-blocklist.txt",
+        "minCount": 1
+      }
+    },
+    {
+      "key": "udp",
+      "displayName": "Example app - block listed hosts (UDP)",
+      "protocol": "UDP",
+      "remoteAddress": {
+        "resolver": "file",
+        "path": "lists/example-blocklist.txt",
+        "minCount": 1
+      }
+    },
+    {
+      "key": "telemetry-host",
+      "displayName": "Example app - block a host by name (TCP 443)",
+      "description": "The 'dns' resolver freezes whatever the name resolves to at apply time; the rule does not follow later DNS changes. Re-apply periodically, or prefer a static range.",
+      "protocol": "TCP",
+      "remotePort": "443",
+      "enabled": false,
+      "remoteAddress": {
+        "resolver": "dns",
+        "hostnames": ["example.com"],
+        "addressFamily": "IPv4",
+        "minCount": 1
+      }
+    }
+  ]
+}
