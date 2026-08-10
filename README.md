@@ -1,4 +1,4 @@
-# Manage-Firewall
+# Narrow-the-Valve
 
 Apply, inspect, disable, and remove Windows Firewall rules, treating one JSON file as one group.
 
