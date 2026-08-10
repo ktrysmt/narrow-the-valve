@@ -11,7 +11,7 @@ Remote addresses can be fixed values, or fetched from an external source at appl
 `steam-relay-tokyo` is used as the running example below; every other ruleset follows the same flow.
 
 ```powershell
-cd $env:USERPROFILE\narrow-to-valve
+cd $env:USERPROFILE\narrow-the-valve
 
 # 1. See what's there (no admin rights needed)
 .\Manage-Firewall.ps1
