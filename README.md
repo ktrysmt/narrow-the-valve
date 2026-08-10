@@ -34,7 +34,7 @@ Step 2 is the habit worth keeping: `-WhatIf` really does fetch the lists, and sh
 Running the script at all requires either a one-time `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or the full-path invocation, which also saves the `cd`:
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\claude_local\firewall\Manage-Firewall.ps1" Apply steam-relay-tokyo -Program "C:\Program Files (x86)\Steam\steamapps\common\ARMORED CORE VI FIRES OF RUBICON\Game\armoredcore6.exe"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\narrow-the-valve\Manage-Firewall.ps1" Apply steam-relay-tokyo -Program "C:\Program Files (x86)\Steam\steamapps\common\ARMORED CORE VI FIRES OF RUBICON\Game\armoredcore6.exe"
 ```
 
 ---
@@ -150,6 +150,7 @@ To add a resolver, write a `Resolve-Xxx` in `lib\Resolvers.ps1` and add a single
 - Only `fwmgr:<group>:*` is touched — hand-made rules and rules from other software are left alone
 - Overly broad Block rules are rejected — if none of destination, port, protocol, or program is constrained, it will not be created without `-Force`
 - Automatic backup — the current state is written to `backups\` before Apply / Remove, in the same format as Export so it can be read back
+- Descriptions converge — each rule's description carries a `[fwmgr <group>/<key>, applied <time>]` marker, and any existing marker is stripped on the way in, so applying an export or a backup does not stack a second one
 - Orphan cleanup — a rule removed from the JSON is automatically deleted from that group
 
 ---
@@ -186,20 +187,96 @@ A sample of the `file` / `dns` resolvers and of scoping to a program. The exe pa
 
 ## Scheduled refresh
 
+Relay addresses move, so a group is only as current as its last Apply. Register a scheduled task and stop thinking about it. Run this once from an elevated PowerShell; `$exe` is the only line to edit.
+
 ```powershell
-$script = "$env:USERPROFILE\claude_local\firewall\Manage-Firewall.ps1"
+cd $env:USERPROFILE\narrow-the-valve
+$script = (Resolve-Path .\Manage-Firewall.ps1).ProviderPath
+$exe    = 'C:\...\yourgame.exe'
+$logDir = "$env:ProgramData\narrow-the-valve"
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+
+# The trailing fragment is single-quoted so $LASTEXITCODE reaches the task, instead of
+# being expanded here at registration time.
+$inner = "& '$script' Apply steam-relay-tokyo -Program '$exe' -KeepState *>> '$logDir\refresh.log'" + '; exit [int]$LASTEXITCODE'
+
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`" Apply steam-relay-tokyo -Program `"...\yourgame.exe`" -KeepState"
-$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 4am
-Register-ScheduledTask -TaskName 'Refresh SDR-Pin-TYO' -Action $action -Trigger $trigger -RunLevel Highest
+    -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"$inner`""
+
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 4am `
+    -RandomDelay (New-TimeSpan -Minutes 30)
+
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+
+$settings = New-ScheduledTaskSettingsSet `
+    -StartWhenAvailable `
+    -RunOnlyIfNetworkAvailable `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 15)
+
+Register-ScheduledTask -TaskName 'Refresh SDR-Pin-TYO' -TaskPath '\narrow-the-valve\' `
+    -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
+    -Description 'Re-apply steam-relay-tokyo so the relay list stays current.'
 ```
+
+Why the ceremony, rather than a bare `Register-ScheduledTask`:
+
+| Piece | Why |
+| --- | --- |
+| Runs as `SYSTEM` | Apply needs elevation. SYSTEM has it unattended: no stored password, no UAC prompt, and it runs whether or not anyone is logged in |
+| `-KeepState` | A group you disabled by hand stays disabled. Without it, the 4am run quietly switches your rules back on |
+| `-RunOnlyIfNetworkAvailable`, `-RestartCount 3` | The run really does call the Steam API, so an interface that is not up yet would otherwise burn the week's only attempt |
+| `-StartWhenAvailable` | A machine that is off at 4am catches up at next boot instead of silently skipping |
+| `powershell.exe`, not `pwsh` | The script targets Windows PowerShell 5.1, where the NetSecurity cmdlets are native |
+| `*>> refresh.log` | `-File` cannot redirect, and the output is worth keeping. Nothing rotates this file |
+
+Check on it:
+
+```powershell
+Start-ScheduledTask -TaskName 'Refresh SDR-Pin-TYO' -TaskPath '\narrow-the-valve\'
+
+Get-ScheduledTaskInfo -TaskName 'Refresh SDR-Pin-TYO' -TaskPath '\narrow-the-valve\' |
+    Select-Object LastRunTime, LastTaskResult, NextRunTime
+
+Get-Content "$env:ProgramData\narrow-the-valve\refresh.log" -Tail 40
+```
+
+`LastTaskResult` 0 is success; 1 means the script aborted and left the firewall untouched. `Status -Group SDR-Pin-TYO` is the other half of the answer — every rule's description carries the timestamp of the Apply that last wrote it, so you can see whether a run really landed.
+
+Each scheduled run also writes a snapshot to `backups\`, and nothing prunes them. Add `-NoBackup` to `$inner` if a weekly snapshot is not worth the file.
+
+Undo the whole thing with:
+
+```powershell
+Unregister-ScheduledTask -TaskName 'Refresh SDR-Pin-TYO' -TaskPath '\narrow-the-valve\' -Confirm:$false
+```
+
+### Refreshing by hand
+
+An occasional manual refresh, from an elevated PowerShell:
+
+```powershell
+& "$env:USERPROFILE\narrow-the-valve\Manage-Firewall.ps1" Apply steam-relay-tokyo -Program "C:\...\yourgame.exe" -NoBackup
+```
+
+The same thing from an ordinary prompt, elevating on the way:
+
+```powershell
+Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -NoExit -Command `"& '$env:USERPROFILE\narrow-the-valve\Manage-Firewall.ps1' Apply steam-relay-tokyo -Program 'C:\...\yourgame.exe' -NoBackup`""
+```
+
+`-NoExit` is what keeps the elevated window open; without it the window closes the instant the run ends and you never see the result. `-NoBackup` skips the snapshot, which is what you want for something you run often and deliberately. `-KeepState` is deliberately absent here, since running it by hand usually means you want the group on.
+
+Re-run it as often as you like. Rules are upserted under a stable name rather than recreated, fields you left out are pinned back to `Any`, rules dropped from the ruleset are pruned, and the description marker is stripped before a fresh one is stamped, so the group converges on the ruleset instead of drifting. The addresses themselves converge on upstream, which is the point. And a failed fetch aborts before anything is written, so a failed run is a no-op rather than a half-applied group.
 
 ---
 
 ## Layout
 
 ```
-firewall/
+narrow-the-valve/
   Manage-Firewall.ps1                  # main script
   lib/Resolvers.ps1                    # steam-sdr / file / dns
   rulesets/

@@ -99,6 +99,13 @@ $script:RuleSetDir   = Join-Path $PSScriptRoot 'rulesets'
 $script:BackupDir    = Join-Path $PSScriptRoot 'backups'
 $script:ExportDir    = Join-Path $PSScriptRoot 'exports'
 
+# Recognises the provenance marker Apply stamps into every description, e.g.
+#   [fwmgr SDR-Pin-TYO/sdr-relays, applied 2026-08-10 21:00]
+# Kept deliberately narrow - the literal prefix, and a timestamp of the exact shape
+# New-RuleSpec writes - so a description that merely contains brackets survives. Must
+# be kept in step with the string built at the end of New-RuleSpec.
+$script:MarkerPattern = '\s*\[fwmgr\s[^\[\]]*?,\s*applied\s\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\]'
+
 # ruleset JSON key -> New-NetFirewallRule parameter
 $script:FieldMap = [ordered]@{
     displayName   = 'DisplayName'
@@ -189,6 +196,20 @@ function Assert-Administrator {
 function Get-RuleName {
     param([string]$GroupName, [string]$Key)
     return ('{0}:{1}:{2}' -f $script:RulePrefix, $GroupName, $Key)
+}
+
+function Remove-RuleMarker {
+    <#  Strip the provenance marker out of a description on the way in.
+
+        Export serialises the live description verbatim, marker included, so applying
+        an exported ruleset - or a backup, which is the same format - would stamp a
+        second marker onto the first, and every export/apply round trip would add one
+        more. Stripping before the fresh marker is appended keeps the description
+        convergent, and repairs a rule that already carries a stack of them. #>
+    param([string]$Description)
+
+    if (-not $Description) { return '' }
+    return ([regex]::Replace($Description, $script:MarkerPattern, '')).Trim()
 }
 
 function Get-GroupRuleFilter {
@@ -359,9 +380,10 @@ function New-RuleSpec {
         }
     }
 
-    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm'
-    if ($spec['Description']) {
-        $spec['Description'] = "$($spec['Description']) [fwmgr $GroupName/$key, applied $stamp]"
+    $stamp     = Get-Date -Format 'yyyy-MM-dd HH:mm'
+    $narrative = Remove-RuleMarker ([string]$spec['Description'])
+    if ($narrative) {
+        $spec['Description'] = "$narrative [fwmgr $GroupName/$key, applied $stamp]"
     } else {
         $spec['Description'] = "[fwmgr $GroupName/$key, applied $stamp]"
     }
